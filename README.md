@@ -2,4 +2,5 @@
 Yay!!!!!
 
 ## Running
-`node real.js`
+1. `npm i`
+2. `node real.js`
