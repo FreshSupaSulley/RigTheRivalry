@@ -76,6 +76,7 @@ while (true) {
                 university: 'OSU',
                 profileUrl: 'https://www.linkedin.com/in/elijahpaulman/',
             }, {
+                // sorry random girl nothing personal
                 university: 'UMich',
                 profileUrl: 'https://www.linkedin.com/in/amywangc/',
             }],

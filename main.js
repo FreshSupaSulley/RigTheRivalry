@@ -72,6 +72,8 @@ async function fetchPairData() {
 
 async function getTokenFromPage() {
     return await page.evaluate(() => {
+        // Get a new token
+        window.turnstile.reset();
         return new Promise((resolve, reject) => {
             // Listen for the message event
             window.addEventListener("message", (event) => {
@@ -79,35 +81,49 @@ async function getTokenFromPage() {
                     resolve(event.data.token);
                 }
             });
-
-            // Optionally handle timeout if the event doesn't fire
+            // Handle timeout in case the event doesn't fire
             setTimeout(() => reject("Token not received in time :("), 5000);
         });
     });
 }
 
-// Once the candidates are fetched AND the turnstile token is extracted, then vote
-const result = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
-    console.log("Voting...");
-    const response = await fetch(`${voteURL}/vote`, {
-        method: "POST",
-        headers: {
-            'x-turnstile-token': token
-        },
-        body: JSON.stringify({
-            loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
-            winnerUrl: data.candidates[data.osuIndex].profileUrl
-        })
-    });
-    if (!response.ok) {
-        throw new Error(`Vote failed with status: ${response.status}`);
-    }
-    console.log("Vote successful:", await response.json());
-    return true;
-}).catch(e => {
-    console.error("Failed to bot this bitch:", e);
-    return false;
-});
+const successTimeout = 3000; // MS to wait if successful
+const errorTimeout = 30 * 1000; // If something goes wrong, wait longer
+const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF
+var counter = 0;
 
-console.log("Success:", result);
-browser.close();
+// Go indefinitely
+while (true) {
+    console.log("Attempt:", ++counter);
+
+    // Once the candidates are fetched AND the turnstile token is extracted, then vote
+    const success = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
+        console.log("Voting...");
+        const response = await fetch(`${voteURL}/vote`, {
+            method: "POST",
+            headers: {
+                'x-turnstile-token': token
+            },
+            body: JSON.stringify({
+                loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
+                winnerUrl: data.candidates[data.osuIndex].profileUrl
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Vote failed with status: ${response.status}`);
+        }
+        console.log("Vote successful:", await response.json());
+        return true;
+    }).catch(e => {
+        console.error("Failed to bot this bitch:", e);
+        return false;
+    });
+
+    console.log("Success:", success);
+
+    // Wait an arbitrary amount of time before trying again
+    // If there was an error, wait a longer amount of time
+    await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
+}
+
+// browser.close();
