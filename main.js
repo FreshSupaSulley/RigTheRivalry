@@ -2,8 +2,37 @@
 import { connect } from "puppeteer-real-browser";
 
 const { browser, page } = await connect({
+    // Apparently only headless: false consistently bypasses CAPTCHAs so we're fucked on this one ig
+    // https://github.com/ZFC-Digital/puppeteer-real-browser/issues/272
     headless: false,
-    args: [],
+    // ... so let's reduce our footprint
+    args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--disable-infobars',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--password-store=basic',
+        '--use-mock-keychain',
+        '--window-size=1,1',
+        '--window-position=0,0',
+        '--hide-scrollbars',
+        '--disable-infobars',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-extensions',
+        '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
+        '--mute-audio',
+        '--start-minimized'
+        // These seem to fuck shit up
+        // '--remote-debugging-port=0',
+        // '--no-startup-window',
+    ],
     customConfig: {},
     turnstile: true,
     connectOption: {},
@@ -11,12 +40,16 @@ const { browser, page } = await connect({
     ignoreAllFlags: false,
 });
 
+await page.setViewport({
+    width: 400,
+    height: 300,
+    deviceScaleFactor: 1
+});
+
 await page.goto("https://ranktherivalry.com/#/vote");
 
-// TODO: put this in a thread to extract while the token is still generating. When both are done, then vote
 // I assume this stays the same? Might need to extract from the site
 const voteURL = "https://d33k4o8eoztw5u.cloudfront.net";
-var pairData, osuIndex;
 
 async function fetchPairData() {
     while (true) {
@@ -53,9 +86,10 @@ async function getTokenFromPage() {
     });
 }
 
-const result = await Promise.all([fetchPairData(), getTokenFromPage()]).then(([data, token]) => {
-    console.log("Both tasks complete");
-    return fetch(`${voteURL}/vote`, {
+// Once the candidates are fetched AND the turnstile token is extracted, then vote
+const result = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
+    console.log("Voting...");
+    const response = await fetch(`${voteURL}/vote`, {
         method: "POST",
         headers: {
             'x-turnstile-token': token
@@ -64,13 +98,12 @@ const result = await Promise.all([fetchPairData(), getTokenFromPage()]).then(([d
             loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
             winnerUrl: data.candidates[data.osuIndex].profileUrl
         })
-    }).then(async response => {
-        if (!response.ok) {
-            throw new Error(`Vote failed with status: ${response.status}`);
-        }
-        console.log("Vote successful:", await response.json());
-        return true;
-    })
+    });
+    if (!response.ok) {
+        throw new Error(`Vote failed with status: ${response.status}`);
+    }
+    console.log("Vote successful:", await response.json());
+    return true;
 }).catch(e => {
     console.error("Failed to bot this bitch:", e);
     return false;
