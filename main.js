@@ -1,6 +1,14 @@
 // https://github.com/ZFC-Digital/puppeteer-real-browser
 import { connect } from "puppeteer-real-browser";
 
+// I assume this stays the same? Might need to extract from the site
+const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
+
+// Fetch the leaderboard
+const participants = await (await fetch(`${cfURL}/leaderboard`)).json();
+const osu = participants.filter(p => p.university === "OSU");
+const umich = participants.filter(p => p.university === "UMich");
+
 const { browser, page } = await connect({
     // Apparently only headless: false consistently bypasses CAPTCHAs so we're fucked on this one ig
     // https://github.com/ZFC-Digital/puppeteer-real-browser/issues/272
@@ -48,32 +56,39 @@ await page.setViewport({
 
 await page.goto("https://ranktherivalry.com/#/vote");
 
-// I assume this stays the same? Might need to extract from the site
-const voteURL = "https://d33k4o8eoztw5u.cloudfront.net";
+// LEGACY
+// async function fetchPairData() {
+//     while (true) {
+//         const response = await fetch(`${cfURL}/getPair`);
+//         if (!response.ok) {
+//             throw new Error("Failed getting candidates: " + await response.text());
+//         }
+//         const data = await response.json();
+//         // Check if 1 is OSU, and 1 is Michigan
+//         if (data[0].university !== data[1].university) {
+//             console.log("OSU v Mich found!");
+//             return {
+//                 candidates: data,
+//                 osuIndex: data[0].university == "OSU" ? 0 : 1
+//             }
+//         }
+//         console.log("Same college, gonna keep looking...");
+//     }
+// }
 
+// Instead of fetching live pairs just grab participants at random
 async function fetchPairData() {
-    while (true) {
-        const response = await fetch(`${voteURL}/getPair`);
-        if (!response.ok) {
-            throw new Error("Failed getting candidates: " + await response.text());
-        }
-        const data = await response.json();
-        // Check if 1 is OSU, and 1 is Michigan
-        if (data[0].university !== data[1].university) {
-            console.log("OSU v Mich found!");
-            return {
-                candidates: data,
-                osuIndex: data[0].university == "OSU" ? 0 : 1
-            }
-        }
-        console.log("Same college, gonna keep looking...");
+    const random = arr => arr[Math.floor(Math.random() * arr.length)];
+    return {
+        candidates: [random(osu), random(umich)],
+        osuIndex: 0
     }
 }
 
 async function getTokenFromPage() {
     return await page.evaluate(() => {
-        // Get a new token
-        window.turnstile.reset();
+        // Get a new token (the ? is to ensure the widget / api script exists, which it usually doesn't on first boot)
+        window.turnstile?.reset();
         return new Promise((resolve, reject) => {
             // Listen for the message event
             window.addEventListener("message", (event) => {
@@ -87,19 +102,19 @@ async function getTokenFromPage() {
     });
 }
 
-const successTimeout = 3000; // MS to wait if successful
-const errorTimeout = 30 * 1000; // If something goes wrong, wait longer
+const successTimeout = 5000; // MS to wait if successful
+const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
 const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF
-var counter = 0;
+var attempt = 0, successes = 0, failures = 0;
 
 // Go indefinitely
 while (true) {
-    console.log("Attempt:", ++counter);
+    console.log(`Attempt ${++attempt} (successes: ${successes}, failures: ${failures})`);
 
     // Once the candidates are fetched AND the turnstile token is extracted, then vote
     const success = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
         console.log("Voting...");
-        const response = await fetch(`${voteURL}/vote`, {
+        const response = await fetch(`${cfURL}/vote`, {
             method: "POST",
             headers: {
                 'x-turnstile-token': token
@@ -110,11 +125,13 @@ while (true) {
             })
         });
         if (!response.ok) {
-            throw new Error(`Vote failed with status: ${response.status}`);
+            throw new Error(`Vote failed with status: ${response.status} - ${await response.text()}`);
         }
         console.log("Vote successful:", await response.json());
+        successes++;
         return true;
     }).catch(e => {
+        failures++;
         console.error("Failed to bot this bitch:", e);
         return false;
     });
