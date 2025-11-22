@@ -11,18 +11,35 @@ const { browser, page } = await connect({
     ignoreAllFlags: false,
 });
 
-// First, wait for getPair to come back
-var voteURL, pairData, osuIndex;
-page.on("response", async (res) => {
-    const url = res.url();
-    if (url.includes("/getPair")) {
-        const data = await res.json();
-        // Store for voting in about 2 more seconds
-        voteURL = url;
+// TODO: put this in a thread to extract while the token is still generating. When both are done, then vote
+// I assume this stays the same? Might need to extract from the site
+const voteURL = "https://d33k4o8eoztw5u.cloudfront.net";
+var pairData, osuIndex;
+
+while (true) {
+    const response = await fetch(`${voteURL}/getPair`);
+    const data = await response.json();
+    console.log(data);
+    // Check if 1 is OSU, and 1 is Michigan
+    if (data[0].university !== data[1].university) {
         pairData = data;
         osuIndex = data[0].university == "OSU" ? 0 : 1;
+        break;
     }
-});
+    console.log("Same college, gonna keep looking...");
+}
+
+// First, wait for getPair to come back
+// page.on("response", async (res) => {
+//     const url = res.url();
+//     if (url.includes("/getPair")) {
+//         const data = await res.json();
+//         // Store for voting in about 2 more seconds
+//         voteURL = url;
+//         pairData = data;
+//         osuIndex = data[0].university == "OSU" ? 0 : 1;
+//     }
+// });
 
 /**
  * WHAT WE SHOULD DO INSTEAD
@@ -31,17 +48,8 @@ page.on("response", async (res) => {
  * 
  * Then once we get OSU v Michigan, only vote for OSU.
  */
-
-/*
- * TODO:
- * If both players are on the same team, do the following:
- * 
- * If both are UMich, vote for the worse ELO score.
- * If both are Ohio State, vote for the higher ELO.
- */
-
 await page.goto("https://ranktherivalry.com/#/vote");
-const token = await page.evaluate(() => {
+const result = await page.evaluate(() => {
     return new Promise((resolve, reject) => {
         // Listen for the message event
         window.addEventListener("message", (event) => {
@@ -54,8 +62,8 @@ const token = await page.evaluate(() => {
         setTimeout(() => reject("Token not received in time :("), 5000);
     });
 }).then(async token => {
-    console.log("RAHH!H!!", token);
-    let response = await fetch(voteURL.replace("getPair", "vote"), {
+    console.log("Token acquired:", token);
+    return fetch(`${voteURL}/vote`, {
         method: "POST",
         headers: {
             'x-turnstile-token': token
@@ -65,8 +73,16 @@ const token = await page.evaluate(() => {
             winnerUrl: pairData[osuIndex].profileUrl
         })
     });
-    console.log("RESPONSE", await response.json());
+}).then(async response => {
+    if (!response.ok) {
+        throw new Error(`Vote failed with status: ${response.status}`);
+    }
+    console.log("Vote successful:", await response.json());
+    return true;
 }).catch(e => {
     console.error("Failed to bot this bitch:", e);
-    return null;
+    return false;
 });
+
+console.log("Success:", result);
+browser.close();
