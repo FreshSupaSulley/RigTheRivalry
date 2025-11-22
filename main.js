@@ -41,7 +41,9 @@ const { browser, page } = await connect({
         // '--remote-debugging-port=0',
         // '--no-startup-window',
     ],
-    customConfig: {},
+    customConfig: {
+        chromePath: "/usr/bin/chromium"
+    },
     turnstile: true,
     connectOption: {},
     disableXvfb: false,
@@ -102,9 +104,9 @@ async function getTokenFromPage() {
     });
 }
 
-const successTimeout = 5000; // MS to wait if successful
+const successTimeout = 6000; // MS to wait if successful
 const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
-const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF
+const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF (idk if this does anything)
 var attempt = 0, successes = 0, failures = 0;
 
 // Go indefinitely
