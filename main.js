@@ -56,7 +56,7 @@ await page.setViewport({
     deviceScaleFactor: 1
 });
 
-await page.goto("https://ranktherivalry.com/#/vote");
+await page.goto("https://www.google.com");
 
 // LEGACY
 // async function fetchPairData() {
@@ -79,70 +79,70 @@ await page.goto("https://ranktherivalry.com/#/vote");
 // }
 
 // Instead of fetching live pairs just grab participants at random
-async function fetchPairData() {
-    const random = arr => arr[Math.floor(Math.random() * arr.length)];
-    return {
-        candidates: [random(osu), random(umich)],
-        osuIndex: 0
-    }
-}
+// async function fetchPairData() {
+//     const random = arr => arr[Math.floor(Math.random() * arr.length)];
+//     return {
+//         candidates: [random(osu), random(umich)],
+//         osuIndex: 0
+//     }
+// }
 
-async function getTokenFromPage() {
-    return await page.evaluate(() => {
-        // Get a new token (the ? is to ensure the widget / api script exists, which it usually doesn't on first boot)
-        window.turnstile?.reset();
-        return new Promise((resolve, reject) => {
-            // Listen for the message event
-            window.addEventListener("message", (event) => {
-                if (event.data.token) {
-                    resolve(event.data.token);
-                }
-            });
-            // Handle timeout in case the event doesn't fire
-            setTimeout(() => reject("Token not received in time :("), 5000);
-        });
-    });
-}
+// async function getTokenFromPage() {
+//     return await page.evaluate(() => {
+//         // Get a new token (the ? is to ensure the widget / api script exists, which it usually doesn't on first boot)
+//         window.turnstile?.reset();
+//         return new Promise((resolve, reject) => {
+//             // Listen for the message event
+//             window.addEventListener("message", (event) => {
+//                 if (event.data.token) {
+//                     resolve(event.data.token);
+//                 }
+//             });
+//             // Handle timeout in case the event doesn't fire
+//             setTimeout(() => reject("Token not received in time :("), 5000);
+//         });
+//     });
+// }
 
-const successTimeout = 6000; // MS to wait if successful
-const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
-const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF (idk if this does anything)
-var attempt = 0, successes = 0, failures = 0;
+// const successTimeout = 6000; // MS to wait if successful
+// const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
+// const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF (idk if this does anything)
+// var attempt = 0, successes = 0, failures = 0;
 
-// Go indefinitely
-while (true) {
-    console.log(`Attempt ${++attempt} (successes: ${successes}, failures: ${failures})`);
+// // Go indefinitely
+// while (true) {
+//     console.log(`Attempt ${++attempt} (successes: ${successes}, failures: ${failures})`);
 
-    // Once the candidates are fetched AND the turnstile token is extracted, then vote
-    const success = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
-        console.log("Voting...");
-        const response = await fetch(`${cfURL}/vote`, {
-            method: "POST",
-            headers: {
-                'x-turnstile-token': token
-            },
-            body: JSON.stringify({
-                loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
-                winnerUrl: data.candidates[data.osuIndex].profileUrl
-            })
-        });
-        if (!response.ok) {
-            throw new Error(`Vote failed with status: ${response.status} - ${await response.text()}`);
-        }
-        console.log("Vote successful:", await response.json());
-        successes++;
-        return true;
-    }).catch(e => {
-        failures++;
-        console.error("Failed to bot this bitch:", e);
-        return false;
-    });
+//     // Once the candidates are fetched AND the turnstile token is extracted, then vote
+//     const success = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
+//         console.log("Voting...");
+//         const response = await fetch(`${cfURL}/vote`, {
+//             method: "POST",
+//             headers: {
+//                 'x-turnstile-token': token
+//             },
+//             body: JSON.stringify({
+//                 loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
+//                 winnerUrl: data.candidates[data.osuIndex].profileUrl
+//             })
+//         });
+//         if (!response.ok) {
+//             throw new Error(`Vote failed with status: ${response.status} - ${await response.text()}`);
+//         }
+//         console.log("Vote successful:", await response.json());
+//         successes++;
+//         return true;
+//     }).catch(e => {
+//         failures++;
+//         console.error("Failed to bot this bitch:", e);
+//         return false;
+//     });
 
-    console.log("Success:", success);
+//     console.log("Success:", success);
 
-    // Wait an arbitrary amount of time before trying again
-    // If there was an error, wait a longer amount of time
-    await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
-}
+//     // Wait an arbitrary amount of time before trying again
+//     // If there was an error, wait a longer amount of time
+//     await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
+// }
 
 // browser.close();
