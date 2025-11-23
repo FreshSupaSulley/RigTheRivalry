@@ -5,7 +5,16 @@ import { connect } from "puppeteer-real-browser";
 const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
 
 // Fetch the leaderboard
-const participants = await (await fetch(`${cfURL}/leaderboard`)).json();
+const participants = await (fetch(`${cfURL}/leaderboard`)).then(response => {
+    if (response.ok) {
+        return response.json();
+    }
+    throw response.text();
+}).catch(async e => {
+    console.error("Can't fetch the leaderboard. Abandoning...\n", await e);
+    process.exit(1);
+});
+
 const osu = participants.filter(p => p.university === "OSU");
 const umich = participants.filter(p => p.university === "UMich");
 
@@ -15,8 +24,6 @@ const { browser, page } = await connect({
     headless: false,
     // ... so let's reduce our footprint
     args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
         '--disable-infobars',
@@ -38,6 +45,8 @@ const { browser, page } = await connect({
         '--mute-audio',
         '--start-minimized'
         // These seem to fuck shit up
+        // '--no-sandbox',
+        // '--disable-setuid-sandbox',
         // '--remote-debugging-port=0',
         // '--no-startup-window',
     ],
