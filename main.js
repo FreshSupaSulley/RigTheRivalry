@@ -46,7 +46,7 @@ const { browser, page } = await connect({
     },
     turnstile: false,
     connectOption: {},
-    disableXvfb: false,
+    disableXvfb: true,
     ignoreAllFlags: false,
 });
 
