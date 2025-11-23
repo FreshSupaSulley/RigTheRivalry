@@ -25,7 +25,7 @@ const { browser, page } = await connect({
         '--no-default-browser-check',
         '--password-store=basic',
         '--use-mock-keychain',
-        // '--window-size=1,1',
+        '--window-size=1,1',
         '--window-position=0,0',
         '--hide-scrollbars',
         '--disable-infobars',
@@ -36,7 +36,7 @@ const { browser, page } = await connect({
         '--disable-extensions',
         '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
         '--mute-audio',
-        // '--start-minimized'
+        '--start-minimized'
         // These seem to fuck shit up
         // '--remote-debugging-port=0',
         // '--no-startup-window',
@@ -97,7 +97,7 @@ async function getTokenFromPage() {
                 }
             });
             // Handle timeout in case the event doesn't fire
-            setTimeout(() => reject("Token not received in time :("), 5000);
+            setTimeout(() => reject("Turnstile token too long :("), 30000); // yes, it can take close to this long (on a pi)
         });
     });
 }
@@ -107,17 +107,19 @@ const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
 const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF
 var attempt = 0, successes = 0, failures = 0;
 
+var turnstile = await getTokenFromPage();
+
 // Go indefinitely
 while (true) {
     console.log(`Attempt ${++attempt} (successes: ${successes}, failures: ${failures})`);
 
     // Once the candidates are fetched AND the turnstile token is extracted, then vote
-    const success = await Promise.all([fetchPairData(), getTokenFromPage()]).then(async ([data, token]) => {
+    const success = await fetchPairData().then(async data => {
         console.log("Voting...");
         const response = await fetch(`${cfURL}/vote`, {
             method: "POST",
             headers: {
-                'x-turnstile-token': token
+                'x-turnstile-token': turnstile
             },
             body: JSON.stringify({
                 loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
@@ -140,7 +142,10 @@ while (true) {
 
     // Wait an arbitrary amount of time before trying again
     // If there was an error, wait a longer amount of time
-    await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
+    const cooldown = new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
+
+    // But during the /vote cooldown, generate another turnstile token
+    [, turnstile] = await Promise.all([cooldown, getTokenFromPage()]);
 }
 
 // browser.close();
