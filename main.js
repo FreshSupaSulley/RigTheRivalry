@@ -44,7 +44,7 @@ const { browser, page } = await connect({
     customConfig: {
         chromePath: "/usr/bin/chromium"
     },
-    turnstile: true,
+    turnstile: false,
     connectOption: {},
     disableXvfb: false,
     ignoreAllFlags: false,
