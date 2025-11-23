@@ -25,7 +25,7 @@ const { browser, page } = await connect({
         '--no-default-browser-check',
         '--password-store=basic',
         '--use-mock-keychain',
-        '--window-size=1,1',
+        // '--window-size=1,1',
         '--window-position=0,0',
         '--hide-scrollbars',
         '--disable-infobars',
@@ -36,7 +36,7 @@ const { browser, page } = await connect({
         '--disable-extensions',
         '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
         '--mute-audio',
-        '--start-minimized'
+        // '--start-minimized'
         // These seem to fuck shit up
         // '--remote-debugging-port=0',
         // '--no-startup-window',
@@ -44,8 +44,7 @@ const { browser, page } = await connect({
     customConfig: {},
     turnstile: true,
     connectOption: {},
-    // To get raspberry pi to work
-    disableXvfb: true,
+    disableXvfb: true, // to get raspberry pi to work
     ignoreAllFlags: false,
 });
 
