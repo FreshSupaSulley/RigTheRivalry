@@ -2,12 +2,12 @@
 import { connect } from "puppeteer-real-browser";
 
 // I assume this stays the same? Might need to extract from the site
-const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
+// const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
 
-// Fetch the leaderboard
-const participants = await (await fetch(`${cfURL}/leaderboard`)).json();
-const osu = participants.filter(p => p.university === "OSU");
-const umich = participants.filter(p => p.university === "UMich");
+// // Fetch the leaderboard
+// const participants = await (await fetch(`${cfURL}/leaderboard`)).json();
+// const osu = participants.filter(p => p.university === "OSU");
+// const umich = participants.filter(p => p.university === "UMich");
 
 const { browser, page } = await connect({
     // Apparently only headless: false consistently bypasses CAPTCHAs so we're fucked on this one ig
