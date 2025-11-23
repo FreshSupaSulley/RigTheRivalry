@@ -5,9 +5,11 @@ import { connect } from "puppeteer-real-browser";
 const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
 
 // Fetch the leaderboard
-const participants = await (await fetch(`${cfURL}/leaderboard`)).json();
-const osu = participants.filter(p => p.university === "OSU");
-const umich = participants.filter(p => p.university === "UMich");
+var participants = await (await fetch(`${cfURL}/leaderboard`)).json();
+var osu = participants.filter(p => p.university === "OSU");
+var umich = participants.filter(p => p.university === "UMich");
+
+const attemptsBeforeRefetching = 50;
 
 const { browser, page } = await connect({
     // Apparently only headless: false consistently bypasses CAPTCHAs so we're fucked on this one ig
@@ -141,6 +143,27 @@ while (true) {
     // Wait an arbitrary amount of time before trying again
     // If there was an error, wait a longer amount of time
     await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
+
+    if(attempt%50 === 0) updateParticipants();
+    await new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + successTimeout)));
 }
 
 // browser.close();
+
+// Refetches participants, adding any that are new to the leaderboard
+async function updateParticipants() {
+    var refetchedParticipants = await (await fetch(`${cfURL}/leaderboard`)).json();
+
+    var newParticipants = refetchedParticipants.filter(rP => !participants.some(p => rP.profileUrl === p.profileUrl))
+
+    console.log("New participants:\n");
+    for(const np of newParticipants) {
+        console.log("\t'" + np.profileUrl + "': " + np.university + ",\n");
+    }
+
+    participants.push(...newParticipants);
+    
+    osu.push(...newParticipants.filter(p => p.university === "OSU"))
+
+    umich.push(...newParticipants.filter(p => p.university === "UMich"))
+}
