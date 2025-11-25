@@ -1,160 +1,237 @@
-// https://github.com/ZFC-Digital/puppeteer-real-browser
-import { connect } from "puppeteer-real-browser";
+import runClient from './utils.js'
+import * as utils from './utils.js';
+import { HttpsProxyAgent } from "https-proxy-agent";
+import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
+import log4js from "log4js";
 
-// I assume this stays the same? Might need to extract from the site
-const cfURL = "https://d33k4o8eoztw5u.cloudfront.net";
+// Setup a good logging library to log the worker's failed jobs because I'm using the console as an admin panel (clearing shit)
+const logFile = "workers.log";
+// Clear logs
+if (fs.existsSync(logFile)) {
+    fs.rmSync(logFile);
+}
 
-// Fetch the leaderboard
-const participants = await (fetch(`${cfURL}/leaderboard`)).then(response => {
-    if (response.ok) {
-        return response.json();
+log4js.configure({
+    appenders: { workers: { type: "file", filename: logFile } },
+    categories: { default: { appenders: ["workers"], level: "error" } },
+});
+
+const logger = log4js.getLogger();
+logger.level = "debug";
+
+// Load our proxy list
+const filename = "proxies.txt"; // update to reflect our current list of working proxies
+const filePath = path.join(process.cwd(), filename);
+const data = fs.readFileSync(filePath, 'utf-8');
+
+// Store them as an array where URL so we can keep track of how many times they fail
+var proxyPool = data.split('\n').map(url => ({
+    url, errors: 0
+}));//.slice(0, 5);
+
+console.log(`Found ${proxyPool.length} proxies`);
+
+const workers = 10; // number of workers
+const maxErrors = 2;
+const jobTime = 45 * 1000; // time before a job is expired (should be tied to how long a turnstile token lasts for, which I assume is just 1 minute?? Docs say otherwise but I think I was getting getting bot_verification_failed errors when it's more than that...)
+
+var totalVotes = 0;
+
+class ProxyWorker {
+    constructor(proxyURL, handler) {
+        this.proxyURL = proxyURL;
+        this.handler = handler;
+        this.busy = false;
     }
-    throw response.text();
-}).catch(async e => {
-    console.error("Can't fetch the leaderboard. Abandoning...\n", await e);
-    process.exit(1);
-});
 
-const osu = participants.filter(p => p.university === "OSU");
-const umich = participants.filter(p => p.university === "UMich");
+    async run(job) {
+        return await this.handler(job, this.proxyURL);
+    }
+}
 
-const { browser, page } = await connect({
-    // Apparently only headless: false consistently bypasses CAPTCHAs so we're fucked on this one ig
-    // https://github.com/ZFC-Digital/puppeteer-real-browser/issues/272
-    headless: false,
-    // ... so let's reduce our footprint
-    args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',
-        '--disable-infobars',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--password-store=basic',
-        '--use-mock-keychain',
-        '--window-size=1,1',
-        '--window-position=0,0',
-        '--hide-scrollbars',
-        '--disable-infobars',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-renderer-backgrounding',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-extensions',
-        '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
-        '--mute-audio',
-        '--start-minimized'
-        // These seem to fuck shit up
-        // '--no-sandbox',
-        // '--disable-setuid-sandbox',
-        // '--remote-debugging-port=0',
-        // '--no-startup-window',
-    ],
-    customConfig: {},
-    turnstile: true,
-    connectOption: {},
-    disableXvfb: true, // to get raspberry pi to work
-    ignoreAllFlags: false,
-});
+class ProxyPool {
+    constructor(handler) {
+        this.handler = handler;
+        this.workers = [...Array(workers)].map(() => new ProxyWorker(this.getRandomProxy(), handler));
+        this.queue = [];
+        this.running = false;
+    }
 
-await page.setViewport({
-    width: 400,
-    height: 300,
-    deviceScaleFactor: 1
-});
+    push(job) {
+        this.queue.push({ job, created: Date.now() });
+    }
 
-await page.goto("https://ranktherivalry.com/#/vote");
+    getRandomProxy() {
+        // Pick a random proxy that hasn't already been claimed by another worker
+        const claimed = new Set(this.workers?.map(w => w.proxyURL) || []);
+        const unclaimed = proxyPool.map(p => p.url).filter(url => !claimed.has(url));
+        if (unclaimed.length === 0) {
+            console.error("No more proxies!");
+            process.exit(1);
+        }
+        return unclaimed[Math.floor(Math.random() * unclaimed.length)];
+    }
 
-// LEGACY
-// async function fetchPairData() {
-//     while (true) {
-//         const response = await fetch(`${cfURL}/getPair`);
-//         if (!response.ok) {
-//             throw new Error("Failed getting candidates: " + await response.text());
-//         }
-//         const data = await response.json();
-//         // Check if 1 is OSU, and 1 is Michigan
-//         if (data[0].university !== data[1].university) {
-//             console.log("OSU v Mich found!");
-//             return {
-//                 candidates: data,
-//                 osuIndex: data[0].university == "OSU" ? 0 : 1
-//             }
-//         }
-//         console.log("Same college, gonna keep looking...");
-//     }
-// }
+    async tick() {
+        // Scramble the workers so a random one is picked to run the task to help distribute the load
+        let idle = utils.shuffle(this.workers.filter(w => !w.busy));
 
-// Instead of fetching live pairs just grab participants at random
-async function fetchPairData() {
+        // Abandon if there's no free workers OR there's nothing to do
+        if (idle.length === 0 || this.queue.length === 0) {
+            return;
+        }
+
+        // Assign jobs to all idle workers
+        for (const worker of idle) {
+            const entry = this.queue.shift();
+            if (!entry) continue;
+
+            const { job, created } = entry;
+
+            if (Date.now() - created > jobTime) {
+                console.warn("Job expired (a wasted turnstile token). Consider running more workers");
+                continue;
+            }
+
+            // Claim worker
+            worker.busy = true;
+
+            (async () => {
+                try {
+                    const result = await worker.run(job);
+                    logger.info(`Worker ${worker.proxyURL} completed job:`, result);
+                    const proxy = proxyPool.find(p => p.url == worker.proxyURL);
+                    proxy.errors = Math.max(0, proxy.errors - 1);
+                } catch (error) {
+                    // Keep track of how many errors each proxy gives us
+                    const proxy = proxyPool.find(p => p.url == worker.proxyURL);
+                    proxy.errors++;
+                    logger.error(`Proxy ${worker.proxyURL} failed (${proxy.errors}/${maxErrors} allowed errors):`, error);
+                    // If the proxy fucked up enough times
+                    if (proxy.errors >= maxErrors) {
+                        // Remove from the list
+                        // console.warn("Proxy exceeded maximum allowed errors");
+                        proxyPool = proxyPool.filter(p => p.url !== worker.proxyURL);
+                    }
+                    // Replace the worker's proxy and requeue the failed job
+                    worker.proxyURL = this.getRandomProxy();
+                    this.queue.unshift(entry);
+                } finally {
+                    // Release worker
+                    worker.busy = false;
+                }
+            })();
+        };
+    }
+}
+
+// Give us an update
+async function loop() {
+    while (true) {
+        pool.tick();
+
+        const rows = pool.workers.map(worker => ([
+            worker.proxyURL, worker.busy
+        ]));
+
+        // TODO: put this in a simple webpage instead of dumping into console
+        // Prep console
+        console.clear();
+        console.log(`Votes: ${totalVotes}\tQueued jobs: ${pool.queue.length}`);
+        printStats([`Workers (${rows.length})`, "Is Voting"], rows);
+
+        // Print bad proxies
+        console.log(`\nProxies: ${proxyPool.length}\tProxies with errors: ${proxyPool.filter(proxy => proxy.errors > 0).length}`);
+
+        // Wait before updating again
+        await utils.sleep(1000);
+    }
+}
+
+function getPairData() {
     const random = arr => arr[Math.floor(Math.random() * arr.length)];
     return {
-        candidates: [random(osu), random(umich)],
-        osuIndex: 0
+        candidates: [random(utils.osu), random(utils.umich)],
+        // candidates: [random(utils.osu), random(utils.osu)],
+        osuIndex: 0,
+    };
+}
+
+async function handler(job, proxyURL) {
+    // Get our participants
+    const data = getPairData();
+    // Use the proxy to make the request
+    const response = await utils.timeoutRace(fetch(`${utils.cfURL}/vote`, {
+        agent: new HttpsProxyAgent(`http://${proxyURL}`),
+        method: "POST",
+        headers: {
+            "x-turnstile-token": job.token,
+        },
+        body: JSON.stringify({
+            loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
+            winnerUrl: data.candidates[data.osuIndex].profileUrl,
+        }),
+    }), 30 * 1000); // 30s ok?
+
+    // TODO: deny jobs that have tokens expiring too soon
+    const raw = await response.text();
+
+    if (!response.ok) {
+        if (response.status == 429) {
+            // Ignore too many requests. Idk what to do with those. Must be identifying me from the turnstile token
+            console.warn("Got a too many requests error:", raw);
+            return raw;
+        }
+        // Otherwise consider this job a failure upstream to replace its proxy
+        throw new Error(`Vote failed with status: ${response.status} - ${raw}`);
+    }
+
+    totalVotes++;
+
+    // Don't bother JSON parsing. Printing JSON takes multiple lines in the terminal
+    return raw;
+}
+
+const pool = new ProxyPool(handler);
+loop();
+
+// Now that we have a list of good proxies, start the turnstile token slave
+const client = runClient(async (token) => {
+    pool.push({
+        token
+    });
+});
+
+function printStats(headers, rows) {
+    if (!rows.length) return;
+
+    const colCount = Math.max(headers.length, ...rows.map(r => r.length));
+
+    // Compute max width for each column
+    const colWidths = Array(colCount).fill(0);
+    for (let i = 0; i < colCount; i++) {
+        colWidths[i] = Math.max(
+            String(headers[i] ?? "").length,
+            ...rows.map(r => String(r[i] ?? "").length)
+        );
+    }
+
+    // Print header
+    const headerLine = headers
+        .map((h, i) => String(h).padEnd(colWidths[i]))
+        .join(" | ");
+    const divider = colWidths.map(w => "-".repeat(w)).join("-+-");
+
+    console.log(headerLine);
+    console.log(divider);
+
+    // Print rows
+    for (const row of rows) {
+        const line = row
+            .map((cell, i) => String(cell ?? "").padEnd(colWidths[i]))
+            .join(" | ");
+        console.log(line);
     }
 }
-
-async function getTokenFromPage() {
-    return await page.evaluate(() => {
-        // Get a new token (the ? is to ensure the widget / api script exists, which it usually doesn't on first boot)
-        window.turnstile?.reset();
-        return new Promise((resolve, reject) => {
-            // Listen for the message event
-            window.addEventListener("message", (event) => {
-                if (event.data.token) {
-                    resolve(event.data.token);
-                }
-            });
-            // Handle timeout in case the event doesn't fire
-            setTimeout(() => reject("Turnstile token too long :("), 30000); // yes, it can take close to this long (on a pi)
-        });
-    });
-}
-
-const successTimeout = 6000; // MS to wait if successful
-const errorTimeout = 60 * 1000; // If something goes wrong, back off for a while
-const timeoutVariance = 5000; // [0 - timeoutVariance) extra MS to wait, picked at random, to potentially throw off CF
-var attempt = 0, successes = 0, failures = 0;
-
-var turnstile = await getTokenFromPage();
-
-// Go indefinitely
-while (true) {
-    console.log(`Attempt ${++attempt} (successes: ${successes}, failures: ${failures})`);
-
-    // Once the candidates are fetched AND the turnstile token is extracted, then vote
-    const success = await fetchPairData().then(async data => {
-        console.log("Voting...");
-        const response = await fetch(`${cfURL}/vote`, {
-            method: "POST",
-            headers: {
-                'x-turnstile-token': turnstile
-            },
-            body: JSON.stringify({
-                loserUrl: data.candidates[(data.osuIndex + 1) % 2].profileUrl,
-                winnerUrl: data.candidates[data.osuIndex].profileUrl
-            })
-        });
-        if (!response.ok) {
-            throw new Error(`Vote failed with status: ${response.status} - ${await response.text()}`);
-        }
-        console.log("Vote successful:", await response.json());
-        successes++;
-        return true;
-    }).catch(e => {
-        failures++;
-        console.error("Failed to bot this bitch:", e);
-        return false;
-    });
-
-    console.log("Success:", success);
-
-    // Wait an arbitrary amount of time before trying again
-    // If there was an error, wait a longer amount of time
-    const cooldown = new Promise((resolve => setTimeout(resolve, timeoutVariance * Math.random() + (success ? successTimeout : errorTimeout))));
-
-    // But during the /vote cooldown, generate another turnstile token
-    [, turnstile] = await Promise.all([cooldown, getTokenFromPage()]);
-}
-
-// browser.close();
