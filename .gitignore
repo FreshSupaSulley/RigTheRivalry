@@ -6,5 +6,6 @@ node_modules/
 /playwright/.cache/
 /playwright/.auth/
 
-# Ignore the workers log dump file
+# Me
 workers.log
+participants.json

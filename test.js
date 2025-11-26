@@ -1,4 +1,4 @@
-// import { HttpProxyAgent } from "http-proxy-agent";
+// Test proxies
 import { HttpsProxyAgent } from "https-proxy-agent";
 import fetch from 'node-fetch';
 import * as utils from './utils.js';
@@ -11,12 +11,13 @@ log4js.configure({
     appenders: { proxies: { type: "file", filename: logFile, layout: { type: 'messagePassThrough' } } },
     categories: { default: { appenders: ["proxies"], level: "info" } },
 });
+
 const logger = log4js.getLogger();
 
 // We're going to compare my IP to the server's interpretation of my IP. If they don't match, the proxy masks our IP and probably good for scraping
 const { ip: myIp } = await (await fetch("https://api.ipify.org?format=json")).json();
 
-export default async function testProxy(proxyURL) {
+async function testProxy(proxyURL) {
     const fetchPromise = fetch("https://api.ipify.org?format=json", {
         agent: new HttpsProxyAgent(`http://${proxyURL}`)
     });
