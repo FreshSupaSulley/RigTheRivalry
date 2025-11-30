@@ -16,11 +16,12 @@ function sortParticipants(array) {
 
 function getPairData() {
     // Vote for the lowest OSU candidates over the highest UMich ones
-    // Sorted such that the highest is at the top and the lowest ELO is at the bottom
+    // Sorted such that the highest is at the last index and the lowest ELO is at the 0th
     const variance = arr => Math.floor(Math.random() * (arr.length / 8));
+    const random = arr => arr[Math.floor(Math.random() * arr.length)];
     return {
-        candidates: [osu[osu.length - 1 - variance(osu)], umich[variance(umich)]],
-        // candidates: [random(utils.osu), random(utils.osu)],
+        // candidates: [osu[osu.length - 1 - variance(osu)], umich[variance(umich)]],
+        candidates: [osu.find(person => person.profileUrl === "https://www.linkedin.com/in/raniaomer/"), osu[variance(osu)]],
         osuIndex: 0,
     };
 }
